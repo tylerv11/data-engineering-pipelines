@@ -54,7 +54,7 @@ WITH normalized_events AS (
                 THEN LEFT(batch_id, 8) + 'A' + RIGHT(batch_id, 3)
 
             WHEN batch_id LIKE 'BATCH_A_%'
-             AND action_path LIKE '%PROCESS_FP_HARVEST%'
+             AND action_path LIKE '%PROCESS_STAGE_C_HARVEST%'
              AND (
                     event_description LIKE 'PROMPT_INTER_LOT_RINSE_SELECT%'
                  OR event_description LIKE 'PROMPT_PLATFORM_CLEAR_BEFORE_CLOSE%'
@@ -374,7 +374,7 @@ SELECT
          )
         THEN
             CASE
-                WHEN re.event_time > '2024-12-04'
+                WHEN re.event_time > '2022-03-17'
                     THEN DATEADD(MINUTE, 120, re.event_time)
                 ELSE
                     DATEADD(MINUTE, 300, re.event_time)
