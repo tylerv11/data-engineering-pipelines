@@ -574,7 +574,13 @@ worker_clean AS (
     */
 
     SELECT
-        employee_network_id,
+        /*
+        Portfolio anonymization note:
+        The HRIS source uses a network-oriented worker key. In this anonymized
+        model it is normalized to employee_id before joining to the LMS-derived
+        analytical record so identity naming is consistent downstream.
+        */
+        employee_network_id AS employee_id,
 
         /*
         Data quality note:
@@ -666,7 +672,7 @@ SELECT
 FROM final_status fs
 
 LEFT JOIN worker_clean wc
-    ON  wc.employee_network_id = fs.employee_id
+    ON  wc.employee_id         = fs.employee_id
     AND wc.worker_row_num      = 1
 
 WHERE fs.row_num = 1

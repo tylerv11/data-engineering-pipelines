@@ -4,11 +4,13 @@
 
 ---
 
+This is a pipeline/system flow diagram rather than a relational ERD because the core modeling challenge is event-to-milestone transformation. The source is an automation historian/event log; the output is one analytical timing record per normalized batch or lot.
+
 ## End-to-End Data Flow
 
 ```mermaid
 flowchart TD
-    A([Raw Manufacturing Event Log\nbatch_id, event_time,\nevent_description, action_path,\nequipment_unit]) --> B[Filter to Reporting Window\nevent_time >= start_date]
+    A([Raw Manufacturing Historian Event Log\nbatch_id or lot_id, event_time,\nevent_description, action_path,\nequipment_unit]) --> B[Filter to Reporting Window\nevent_time >= start_date]
 
     B --> C[Batch ID Normalization\nRewrite campaign and double-lot\nbatch IDs into A/B lot variants\nbefore grouping]
 
@@ -22,7 +24,7 @@ flowchart TD
     F --> H
     G --> H
 
-    H --> I([Batch Process Times Gold\nOne wide row per batch\nAll stage timestamps\nand extracted parameters])
+    H --> I([Batch Process Times Gold\nOne analytical row per batch or lot\nAll stage timestamps\nand extracted parameters])
 
     I --> J[Cycle Time Calculations\nstage_duration = end - start\nidle_time = next_start - prior_end]
     J --> K([Power BI Semantic Model\nCycle Time Dashboards\nBottleneck Analysis\nBatch Comparison])
@@ -42,6 +44,8 @@ flowchart LR
     agg -- End event --> mx([MAX event_time\n= step_end_time])
     agg -- Embedded value --> parse([Parse SUBSTRING\n= numeric or timestamp field])
 ```
+
+Starts use `MIN(event_time)` because the first valid qualifying signal represents the start of a step. Ends use `MAX(event_time)` because the final valid qualifying signal represents completion, especially when repeated state changes or parallel equipment paths are present.
 
 ---
 

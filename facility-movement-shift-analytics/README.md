@@ -4,6 +4,8 @@ An anonymized data engineering portfolio project that transforms raw badge acces
 
 > All company names, building names, door names, coordinates, database names, and employee identifiers have been replaced with generic equivalents. The logic, sessionization design, and shift classification approach are original work.
 
+> This is inferred access-event analytics. It does not use GPS, device tracking, or continuous employee location data. Coordinates describe fixed access points only.
+
 ---
 
 ## Overview
@@ -14,6 +16,8 @@ This project takes raw badge swipe telemetry from an access control system and p
 2. **Badge Activity Sessions** — sessionizes badge activity into continuous presence windows and classifies each session by primary shift
 
 Both pipelines anonymize employee identity at the source using a SHA-256 hash, allowing repeatable joins and cross-session tracking without exposing raw employee identifiers.
+
+The outputs are downstream analytical products. `Badge Pathing Points` supports ordered swipe-sequence visualization, while `Badge Activity Sessions` supports shift presence analysis. They are intentionally separate because pathing and shift attribution answer different business questions.
 
 ---
 
@@ -54,6 +58,19 @@ This project builds the transformation layer that turns event-level badge teleme
 - Calculates overlap between each session and five shift windows
 - Assigns a primary shift based on greatest overlap
 - Assigns a minor shift when the second-largest overlap is meaningful
+
+---
+
+## Architecture Principles
+
+- Badge history is the only behavioral source; no GPS or device telemetry is implied
+- Coordinates belong to access points, never to people
+- Pathing is inferred from ordered badge swipe sequences
+- Dwell time is estimated as time until the next observed swipe, not observed physical presence
+- Sessions are preserved across midnight so overnight work is not split into artificial calendar-day fragments
+- Sessionization uses inactivity gap thresholds, not entry/exit assumptions
+- Shift attribution is based on overlap between session windows and configured shift windows
+- Data quality flags are retained so consumers can filter unreliable records transparently
 
 ---
 
@@ -121,9 +138,13 @@ Access point names are matched to a reference table of known coordinates using p
 
 Badge events are ordered by anonymized employee key and card number. `LEAD()` projects the next badge event onto each row, creating an origin-to-destination segment. The time between origin and destination becomes the segment duration. The final output unions both points into one row each so a mapping visual can draw lines between them.
 
+This path is an inference from access-control observations. It should be interpreted as "next observed badge location," not a complete physical route.
+
 ### Dwell and Duration
 
 Duration is calculated as the time between the origin badge event and the next observed badge event. This approximates time between observed badge locations. It is not proof of continuous physical presence between points, and the output does not represent it as such.
+
+Long gaps are especially sensitive to interpretation: they may indicate dwell, missed swipes, unobserved movement, or time spent in an area without reader events. Those records remain useful for analytics when paired with data quality flags and consumer guidance.
 
 ### Sessionization
 
@@ -172,6 +193,29 @@ These flags are retained in the output so downstream consumers can filter them o
 
 ---
 
+## Analytical Use Cases
+
+- Historical workforce presence by shift and weekend coverage window
+- High-level movement pattern analysis between controlled access points
+- Operational staffing review using anonymized repeatable employee keys
+- Data quality monitoring for badge telemetry gaps, micro sessions, and unrealistic stitched sessions
+- Map visualization of inferred movement segments without exposing raw identifiers
+
+---
+
+## Validation Methodology
+
+| Check | Purpose |
+|---|---|
+| Hash stability test | Confirm the same raw employee key maps to the same anonymized key across both pipelines |
+| Coordinate mapping review | Confirm access-point coordinates come only from the reference table |
+| Segment duration bounds | Filter or flag impossible origin-to-destination gaps |
+| Overnight session test | Confirm sessions crossing midnight remain intact |
+| Shift overlap spot check | Manually test boundary cases for day, swing, night, and weekend windows |
+| Single-swipe handling | Confirm duration is not over-interpreted when only one badge event exists |
+
+---
+
 ## Output Datasets
 
 ### Badge Pathing Points
@@ -180,10 +224,10 @@ One origin row and one destination row per movement segment. Designed for map vi
 
 | path_id | anon_employee_key | segment_order | point_type | point_time | door_name | latitude | longitude | duration_hours | has_coordinates |
 |---|---|---:|---|---|---|---:|---:|---:|---:|
-| 839201 | HASH001 | 1 | Origin | 2026-01-08 06:02 | Main Entry | 34.0001 | -118.0001 | 1.4 | 1 |
-| 839201 | HASH001 | 1 | End | 2026-01-08 07:26 | Production Gowning | 34.0002 | -118.0002 | 1.4 | 1 |
-| 839201 | HASH001 | 2 | Origin | 2026-01-08 07:26 | Production Gowning | 34.0002 | -118.0002 | 3.2 | 1 |
-| 839201 | HASH001 | 2 | End | 2026-01-08 10:38 | Warehouse Entry | 34.0003 | -118.0003 | 3.2 | 1 |
+| 839201 | HASH001 | 1 | Origin | 2026-01-08 06:02 | Access Point A | 0.0001 | 0.0001 | 1.4 | 1 |
+| 839201 | HASH001 | 1 | End | 2026-01-08 07:26 | Access Point B | 0.0002 | 0.0002 | 1.4 | 1 |
+| 839201 | HASH001 | 2 | Origin | 2026-01-08 07:26 | Access Point B | 0.0002 | 0.0002 | 3.2 | 1 |
+| 839201 | HASH001 | 2 | End | 2026-01-08 10:38 | Access Point C | 0.0003 | 0.0003 | 3.2 | 1 |
 
 ### Badge Activity Sessions
 
@@ -203,8 +247,9 @@ One row per employee session, with shift classification and data quality flags.
 - Employee identifiers are hashed at the earliest possible step and never appear in any output
 - The hash function is applied consistently (trimmed, uppercased) so the same employee produces the same key across both pipelines
 - No personally identifiable fields are selected from the source system
-- Coordinate data is mapped from a controlled reference table, not sourced from employee devices or systems
+- Coordinate data is mapped from a controlled access-point reference table, not sourced from employee devices or systems
 - Data quality flags allow consumers to exclude unreliable records without discarding them from the model
+- The documentation avoids real door names, building names, coordinates, card numbers, and employee identifiers
 
 ---
 
