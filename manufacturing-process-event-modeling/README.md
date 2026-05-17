@@ -17,6 +17,8 @@ Manufacturing automation systems generate thousands of events per batch. These e
 
 This pipeline solves that by reading raw event history, identifying which specific events represent the start or end of each named process milestone, and collapsing thousands of events into one clean batch-level record with a structured timestamp for every major step.
 
+This is event-to-milestone analytical modeling, not transactional OLTP modeling. The source system is a historian/event log, and the gold output is one analytical timing record per batch or lot.
+
 ---
 
 ## Business Problem
@@ -46,6 +48,31 @@ Operations teams need reliable batch-level milestones, not raw event streams. Cy
 8. Handles double-lot and multi-path batch types by rewriting batch ID variants before aggregation
 9. Produces one wide process-time record per batch
 10. Feeds downstream cycle time, bottleneck, and operational dashboard models
+
+---
+
+## Architecture
+
+```text
+Manufacturing Historian / Event Log
+        ↓
+Reporting Window Filter
+        ↓
+Batch / Lot Normalization
+        ↓
+Event Pattern Classification
+        ↓
+Conditional Aggregation
+        ├─ MIN() for start milestones
+        ├─ MAX() for end milestones
+        └─ String parsing for embedded values and timestamps
+        ↓
+Batch Process Times Gold
+        ↓
+BI Semantic Model / Cycle Time Analytics
+```
+
+The model deliberately uses a pipeline flow representation rather than a strict relational ERD because the important design problem is how raw events become named milestones.
 
 ---
 
@@ -120,6 +147,10 @@ MIN(CASE
 END) AS stage_c_load_clean_start
 ```
 
+### Milestone Extraction Concept
+
+Each milestone is defined by a business-readable rule: event description pattern, action path pattern, equipment/unit context when needed, and whether the earliest or latest qualifying timestamp is the correct analytical signal. This keeps the transformation auditable even when the source event log remains verbose and system-specific.
+
 ---
 
 ## Key Design Decisions
@@ -133,8 +164,34 @@ Manufacturing automation recipes evolve over time. A process step that was once 
 **Why batch ID rewriting before aggregation?**
 Double-lot or multi-product batches may be tracked under a single campaign batch ID at the automation level but need to be separated into individual A and B lot records for analytics. The inner subquery rewrites batch IDs before grouping so each lot can be analyzed independently.
 
+Normalization also protects downstream duration calculations from mixing events that belong to adjacent lots, campaign-level prompts, or alternate batch ID formats.
+
 **Why parse values from event text?**
 Some manufacturing automation systems do not write discrete numeric fields to the historian. Volume entries, equipment timing, and process parameters may only exist as formatted strings inside event descriptions. String parsing is the only way to extract these values into structured analytics columns.
+
+---
+
+## Analytical Use Cases
+
+- One timing record per batch for cycle time dashboards
+- Stage duration and idle-time calculations across sequential process steps
+- Batch-to-batch comparison by equipment unit, lot type, and time period
+- Bottleneck and float analysis for Lean Six Sigma improvement work
+- Common-cause versus special-cause process variation monitoring
+- BI semantic model inputs for leadership, engineering, and operations review
+
+---
+
+## Validation Methodology
+
+| Check | Purpose |
+|---|---|
+| Event sample trace | Manually trace selected batches from raw events to extracted milestones |
+| Start/end aggregation review | Confirm starts use earliest valid signal and ends use latest valid signal |
+| Alternate path coverage | Test equipment/process variants against the same milestone definition |
+| Batch normalization test | Confirm double-lot and alternate batch formats do not contaminate each other |
+| Parsed-value validation | Compare parsed numeric/timestamp values to source event text samples |
+| Duration sanity checks | Flag negative, null, or unrealistic stage durations before BI consumption |
 
 ---
 
@@ -144,9 +201,9 @@ One row per batch. Sample output:
 
 | batch_id | process_start_time | process_unit | batch_volume_liters | stage_a_process_start | stage_a_transfer_end | stage_b_process_start | stage_b_send_end | stage_c_process_end | raw_event_count |
 |---|---|---|---:|---|---|---|---|---|---:|
-| BATCH001 | 2026-01-03 06:12 | UNIT_A | 4200.0 | 2026-01-03 06:12 | 2026-01-03 11:45 | 2026-01-03 13:10 | 2026-01-03 21:40 | 2026-01-04 02:20 | 481 |
-| BATCH002 | 2026-01-04 07:03 | UNIT_B | 3950.0 | 2026-01-04 07:03 | 2026-01-04 12:02 | 2026-01-04 13:44 | 2026-01-04 22:17 | 2026-01-05 01:51 | 506 |
-| BATCH003 | 2026-01-05 06:55 | UNIT_A | 4100.0 | 2026-01-05 06:55 | 2026-01-05 11:30 | 2026-01-05 13:02 | 2026-01-05 21:58 | 2026-01-06 03:05 | 493 |
+| LOT_001 | 2026-01-03 06:12 | UNIT_A | 4200.0 | 2026-01-03 06:12 | 2026-01-03 11:45 | 2026-01-03 13:10 | 2026-01-03 21:40 | 2026-01-04 02:20 | 481 |
+| LOT_002 | 2026-01-04 07:03 | UNIT_B | 3950.0 | 2026-01-04 07:03 | 2026-01-04 12:02 | 2026-01-04 13:44 | 2026-01-04 22:17 | 2026-01-05 01:51 | 506 |
+| LOT_003 | 2026-01-05 06:55 | UNIT_A | 4100.0 | 2026-01-05 06:55 | 2026-01-05 11:30 | 2026-01-05 13:02 | 2026-01-05 21:58 | 2026-01-06 03:05 | 493 |
 
 ---
 
@@ -174,11 +231,23 @@ This enables:
 
 ---
 
-## Governance and Anonymization
+## Privacy and Anonymization Strategy
 
 This portfolio version uses entirely generic table names, event patterns, action paths, and process terminology. No real automation paths, product-specific event descriptions, equipment IDs, operator prompts, or business-identifiable strings appear in this repository.
 
 The transformation logic and event-modeling approach are original work. The specific event patterns and action paths that drive this logic in production were developed through analysis of automation system behavior, process documentation, and iterative validation against observed batch timelines.
+
+Anonymization preserves the architecture and modeling patterns while replacing real operational identifiers with representative placeholders. The README and SQL comments avoid real product names, equipment names, event descriptions, process identifiers, automation paths, and batch IDs.
+
+---
+
+## Governance Considerations
+
+- Keep milestone definitions documented next to the SQL logic so business owners can review assumptions
+- Treat parsed event descriptions as source-system dependent and validate after automation changes
+- Separate batch/lot normalization from milestone aggregation so identity rules are easy to audit
+- Retain raw event counts and completeness indicators in downstream outputs where possible
+- Use semantic-layer measures for duration calculations so KPI definitions remain consistent across dashboards
 
 ---
 
