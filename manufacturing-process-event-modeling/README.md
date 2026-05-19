@@ -209,6 +209,7 @@ Some manufacturing automation systems do not write discrete numeric fields to th
 - Bottleneck and float analysis for Lean Six Sigma improvement work
 - Common-cause versus special-cause process variation monitoring
 - BI semantic model inputs for leadership, engineering, and operations review
+- Delay reason code capture via a companion Flask-based writeback application that allows floor technicians to enter delay inputs against prepopulated batch context, writing governed records into Delta tables that feed directly into the standard work and delay analysis pages (see companion repo: https://github.com/tylerv11/CRUDFlaskApp)
 
 ---
 

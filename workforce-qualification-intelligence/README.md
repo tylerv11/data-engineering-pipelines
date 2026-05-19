@@ -208,6 +208,7 @@ In this anonymized portfolio version, `employee_id` is used consistently as the 
 Post-launch deployment included an embedded hypercare period where the author matched operational stakeholder shift schedules, joined team communication channels, and iterated on model logic, UX, and data quality in real time before formal handoff. Specific improvements driven by hypercare feedback:
 
 - Added curriculum description decoding after users could not identify training items by title alone
+- Corrected a label decode join targeting the wrong field in the Qualification Name / Curriculum Name Lookup Table, discovered through user spot-checks of decoded training titles against source records
 - Filtered inactive audit rows creating phantom overdue counts after supervisors flagged incorrect records
 - Replaced masked LMS name fields with Workday-sourced display names after PII masking was applied upstream
 - Removed high-cardinality duplicate datetime fields to reduce VertiPaq model size and improve query performance
