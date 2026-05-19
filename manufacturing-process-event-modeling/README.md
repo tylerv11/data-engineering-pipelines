@@ -17,6 +17,8 @@ Manufacturing automation systems generate thousands of events per batch. These e
 
 This pipeline solves that by reading raw event history, identifying which specific events represent the start or end of each named process milestone, and collapsing thousands of events into one clean batch-level record with a structured timestamp for every major step.
 
+In production, this pipeline processes hundreds of manufacturing event steps per batch, collapsing thousands of raw historian events per lot into a single analytical timing record. The downstream semantic model runs a biweekly operations review with six department leads across Manufacturing, Process Engineering, Business Excellence, Reliability, Scheduling, and Quality -- and feeds Engineering's capital investment planning system (SchedulePro) with throughput and critical path estimates.
+
 This is event-to-milestone analytical modeling, not transactional OLTP modeling. The source system is a historian/event log, and the gold output is one analytical timing record per batch or lot.
 
 ---
@@ -73,6 +75,34 @@ BI Semantic Model / Cycle Time Analytics
 ```
 
 The model deliberately uses a pipeline flow representation rather than a strict relational ERD because the important design problem is how raw events become named milestones.
+
+---
+
+## Data Model and Downstream Semantic Layer
+
+The gold output table feeds a multi-table semantic model in Power BI. The model is structured as a star schema centered on the process event fact table, with the following key tables:
+
+| Table | Type | Grain |
+|---|---|---|
+| FracDataModel | Fact | One row per micro step per batch |
+| PlasmaMasterTable | Lot master | One row per lot, ISO week |
+| FracDurationsTable | Pre-aggregated | Duration rollup for performance |
+| LatestBatchPerProcessStep_72h | Calculated | Current active batch per step, 72h window |
+| RTMS Delays / JDE Delays | Delay dimensions | One row per delay event per source |
+| MicroStepLookup | Dimension | Step type classification |
+
+**LatestBatchPerProcessStep_72h** is a calculated DAX table -- not a SQL query -- that identifies the most current active batch at each process step within a rolling 72-hour window. It uses TREATAS to project float, critical path turnaround, and wait time measures onto the real-time snapshot. This powers the unit op priority and bottleneck scheduling page used by Engineering for capital investment decisions.
+
+**Key semantic layer measures:**
+- Throughput: 168 hrs/week ÷ system pitch (avg start-to-start at constraint step) × 52.177 × avg volume per lot
+- Float: available buffer before a batch becomes the critical path constraint
+- Float Time Taken / Float Time Overspent: how much buffer was consumed vs. available
+- Process Step Average: SUMX over micro step types with outlier exclusion (0-150hr window), cleaning step exclusions, and PPT vessel normalization
+- Process Step Median: delay-excluded critical path estimate used for MPS delivery schedule and SchedulePro capital planning
+- P20/P80 Spread: spread between best regularly achievable and common case -- used to scope improvement projects
+- Process Drift Flag: visual flag when a step drifts from its historical baseline (SPC custom visual)
+
+**Delay integration:** The standard work page unifies delay events from two separate operational systems -- RTMS (real-time manufacturing system) and JDE work orders (via Databricks) -- into a single shift-based analysis view with rolling averages and process drift indicators. This required matching on batch ID and step across systems with different schemas and timing conventions.
 
 ---
 
@@ -253,8 +283,9 @@ Anonymization preserves the architecture and modeling patterns while replacing r
 
 ## Tech Stack
 
-- **Query language:** T-SQL (SQL Server / Azure SQL compatible)
-- **Source system:** Manufacturing automation event historian
+- **Query language:** Databricks SQL (primary transformation layer) and T-SQL (Microsoft SQL Server source system queries)
+- **Storage layer:** Delta lakehouse -- Bronze raw events, Silver normalized milestones, Gold analytical batch-process-times table
+- **Source system:** Manufacturing automation event historian (Microsoft SQL Server) + ERP delay data (JDE via Databricks)
 - **Transformation pattern:** Conditional aggregation with `MIN(CASE WHEN ...)` and `MAX(CASE WHEN ...)`
 - **String parsing:** `SUBSTRING`, `CHARINDEX`, `TRY_CAST`, `TRY_CONVERT`
 - **Batch ID normalization:** Inline subquery rewrite before grouping
@@ -287,4 +318,11 @@ manufacturing-process-event-modeling/
 - Batch ID normalization for multi-path and double-lot processing
 - Business rule documentation embedded in transformation code
 - BI-ready gold table design for cycle time and bottleneck analytics
+- Star schema semantic model design with fact and dimension tables
+- Calculated DAX table design using TREATAS for cross-filter measure projection (LatestBatchPerProcessStep_72h scheduling layer)
+- Multi-source delay data integration across heterogeneous operational systems
+- Medallion architecture (Bronze/Silver/Gold) on Delta lakehouse
+- SPC and process drift monitoring with custom visual integration
+- Throughput and float modeling for Lean Six Sigma constraint analysis
+- End-to-end product ownership through 7+ major versions over 2 years
 - Privacy-aware anonymization of production SQL logic
