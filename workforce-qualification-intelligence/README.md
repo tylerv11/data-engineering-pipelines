@@ -10,6 +10,8 @@ An anonymized portfolio case study demonstrating how raw learning management and
 
 This project delivers a single, analytics-ready gold-layer view that combines learning platform assignment data, certification and training catalog metadata, completion status references, label decoding lookups, and HRIS hierarchy enrichment into one governed reporting dataset.
 
+In production, this pipeline processes over 15 million training assignment records across 23+ GxP-regulated global manufacturing sites, covering hundreds of thousands of renewal-based certification requirements. The output semantic model serves 1,000-2,000 monthly active users including site leadership, people managers, L&D teams, and training owners across a global pharmaceutical manufacturing network.
+
 The output is designed for direct consumption by a semantic reporting layer such as Power BI, where row-level security, DAX measures, and KPI dashboards sit on top of a trusted, well-documented data foundation.
 
 ---
@@ -73,6 +75,34 @@ The transformation is organized as a chain of CTEs, each with a clear responsibi
 | `worker_clean` | Prepare deduplicated, display-ready employee and manager names from HRIS |
 
 **Analytical grain:** one current analytical record per anonymized employee, certification context, and composite training item identity: `training_item_type + training_item_id + revision_date`.
+
+---
+
+## Semantic Layer and Row-Level Security
+
+The gold view feeds a Power BI semantic model with dynamic row-level security and a four-metric DAX system designed to answer four distinct operational questions at four different analytical grains:
+
+**RLS Architecture:**
+- Implemented via USERPRINCIPALNAME() matched against the Workday directory dimension on a bidirectional relationship between the qualification fact table and HRIS worker dimension (employee_id / ntwrk_id)
+- One model, one deployed report -- no static copies per site
+- Four roles:
+  - Directs: signed-in user sees own training + direct reports (matched on primary work email and manager email)
+  - Site Access: scoped to site via site_code / jl_id dimension filter
+  - Global: all non-EU/EEA sites
+  - Admin: full dataset, no filter
+
+**Four-metric DAX system:**
+
+| Measure | Grain | Pattern |
+|---|---|---|
+| % Quals Qualified (by user-item) | Employee-item pair | SUMMARIZE + FILTER for qualified pairs |
+| Employees Overdue (any item) | Person-level risk flag | ADDCOLUMNS with virtual overdue item count |
+| Emp% Fully Qualified (all items) | Person-level perfection | ADDCOLUMNS comparing item count to qualified count |
+| MyTeamOrSelf Training Rows | RLS-aware row count | KEEPFILTERS + USERPRINCIPALNAME() |
+
+The SUMMARIZE-based pair-level measure avoids double-counting employees across multiple curricula. The ADDCOLUMNS-based person-level measures annotate each employee with virtual columns before filtering, correctly identifying employees with at least one gap (risk flag) and employees with zero gaps (audit readiness).
+
+**Copilot instruction layer:** Synonym mappings and semantic guardrails are configured on the model so AI-generated natural language queries return answers derived from validated enterprise data rather than uncontrolled extracts.
 
 ---
 
@@ -173,6 +203,19 @@ In this anonymized portfolio version, `employee_id` is used consistently as the 
 
 ---
 
+## Deployment and Hypercare
+
+Post-launch deployment included an embedded hypercare period where the author matched operational stakeholder shift schedules, joined team communication channels, and iterated on model logic, UX, and data quality in real time before formal handoff. Specific improvements driven by hypercare feedback:
+
+- Added curriculum description decoding after users could not identify training items by title alone
+- Corrected i18n label join (QUAL_TITLE vs. QUAL_DESC swap) discovered through user spot-checks
+- Filtered inactive audit rows creating phantom overdue counts after supervisors flagged incorrect records
+- Replaced masked LMS name fields with Workday-sourced display names after PII masking was applied upstream
+- Removed high-cardinality duplicate datetime fields to reduce VertiPaq model size and improve query performance
+- Added version history report page so global stakeholders could track logic changes across releases
+
+---
+
 ## Privacy and Anonymization Strategy
 
 - Company, platform, schema, site, and server names are replaced with generic equivalents
@@ -203,6 +246,7 @@ The gold view produces one row per employee, certification, and training item. A
 - No personally identifiable information is selected from unmasked or uncontrolled source fields
 - Deduplication is applied before the final SELECT to ensure downstream consumers receive one clean, current record per subject
 - Regional and privacy-based scope controls are implemented through a site dimension filter rather than hard-coded business identifiers, making the model easier to maintain and extend
+- Regional privacy scoping is implemented as a site dimension filter using 25 EU and EEA country-code prefixes, excluding regulated populations from the deployed dataset scope while retaining them in the lakehouse for audit purposes -- scope is controlled at the data layer, not in the reporting UI
 
 ---
 
@@ -242,4 +286,10 @@ workforce-qualification-intelligence/
 - Active-record filtering strategy to prevent audit row contamination
 - Semantic model readiness with clean, documented output fields
 - Privacy-aware data design with no direct PII exposure from source systems
+- Power BI semantic model with dynamic RLS via USERPRINCIPALNAME() and bidirectional dimension relationships
+- DAX measure design: ADDCOLUMNS with virtual columns, SUMMARIZE for pair-level aggregation, KEEPFILTERS for RLS-aware context
+- Star schema design: qualification fact table with employee, date, and security dimensions
+- Copilot/AI instruction layer governance for enterprise semantic models
+- Medallion architecture gold view on Databricks Delta lakehouse at 15M+ row scale
+- GDPR-aware regional scoping via site dimension filter
 - Business rule documentation embedded in transformation code
